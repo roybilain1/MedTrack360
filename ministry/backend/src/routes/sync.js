@@ -450,7 +450,7 @@ router.get('/announcements', async (req, res) => {
     const rows = await db.query(
       `SELECT news_id AS id, title, body, source, url, published_at AS created_at, published_at AS updated_at
        FROM health_news
-       WHERE is_active = true
+       WHERE is_active = true AND audience IN ('pos', 'both')
        ORDER BY published_at DESC
        LIMIT $1`,
       [limit]

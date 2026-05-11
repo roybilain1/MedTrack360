@@ -15,6 +15,7 @@ function formatDateTime(value) {
 export default function Announcements() {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
+  const [audience, setAudience] = useState('both')
   const [includeInactive, setIncludeInactive] = useState(false)
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
@@ -51,10 +52,12 @@ export default function Announcements() {
     }
     setSubmitting(true)
     try {
-      await announcementsApi.create({ title: trimmedTitle, body: trimmedBody })
+      await announcementsApi.create({ title: trimmedTitle, body: trimmedBody, audience })
       setTitle('')
       setBody('')
-      setStatusMessage('Announcement posted. Pharmacy apps will pick it up on next sync.')
+      setAudience('both')
+      const targetLabel = audience === 'pos' ? 'pharmacy POS apps' : audience === 'mobile' ? 'mobile citizen app' : 'all apps (mobile + POS)'
+      setStatusMessage(`Announcement posted to ${targetLabel}.`)
       await load()
     } catch (e) {
       setError(e.message || 'Failed to post announcement')
@@ -134,6 +137,35 @@ export default function Announcements() {
             {body.length}/{MAX_BODY}
           </div>
         </div>
+        <div>
+          <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+            Send to
+          </label>
+          <div className="mt-1 flex gap-2">
+            {[
+              { key: 'both',   label: 'Both apps',     hint: 'Citizens + Pharmacies' },
+              { key: 'mobile', label: 'Citizen app',   hint: 'Mobile only' },
+              { key: 'pos',    label: 'Pharmacy POS',  hint: 'POS terminals only' },
+            ].map((opt) => {
+              const active = audience === opt.key
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setAudience(opt.key)}
+                  className={`flex-1 text-left px-3 py-2 rounded-lg border text-xs transition-colors ${
+                    active
+                      ? 'bg-teal-50 border-teal-300 ring-2 ring-teal-200 text-teal-800'
+                      : 'bg-white border-slate-300 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="font-semibold">{opt.label}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{opt.hint}</div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
         {error && (
           <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
@@ -190,6 +222,20 @@ export default function Announcements() {
                       <h3 className="text-sm font-semibold text-slate-800 truncate">
                         {item.title}
                       </h3>
+                      {(() => {
+                        const aud = item.audience || 'both'
+                        const audCls = aud === 'pos'
+                          ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                          : aud === 'mobile'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-teal-50 text-teal-700 border-teal-200'
+                        const audLabel = aud === 'pos' ? 'Pharmacy POS' : aud === 'mobile' ? 'Citizen app' : 'Both apps'
+                        return (
+                          <span className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${audCls}`}>
+                            {audLabel}
+                          </span>
+                        )
+                      })()}
                       {!item.is_active && (
                         <span className="text-[10px] font-semibold text-slate-500 bg-slate-200 px-1.5 py-0.5 rounded">
                           DEACTIVATED

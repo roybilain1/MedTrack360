@@ -168,12 +168,21 @@ class SyncManager extends ChangeNotifier {
 
   Future<void> _runSyncCycle() async {
     var totalPushed = 0;
-    for (var i = 0; i < 20; i += 1) {
-      final pushed = await InventoryDatabase.instance.syncUpChunk(
-        chunkSize: 100,
-      );
-      totalPushed += pushed;
-      if (pushed == 0) break;
+    Object? pushError;
+    try {
+      for (var i = 0; i < 20; i += 1) {
+        final pushed = await InventoryDatabase.instance.syncUpChunk(
+          chunkSize: 100,
+        );
+        totalPushed += pushed;
+        if (pushed == 0) break;
+      }
+    } catch (e) {
+      // Don't let push failures block the pull. Stuck local queue items
+      // would otherwise prevent the device from ever receiving server
+      // updates (e.g. the authoritative medicines catalog).
+      pushError = e;
+      _log('Sync push failed (continuing with pull): $e');
     }
 
     await InventoryDatabase.instance.syncDown(
@@ -190,7 +199,7 @@ class SyncManager extends ChangeNotifier {
       },
     );
 
-    _log('Sync cycle complete. Pushed events: $totalPushed');
+    _log('Sync cycle complete. Pushed events: $totalPushed${pushError != null ? " (push had errors)" : ""}');
   }
 
   Future<bool> _runHealthCheck({required String reason}) async {

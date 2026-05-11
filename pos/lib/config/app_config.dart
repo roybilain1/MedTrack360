@@ -51,13 +51,13 @@ class AppConfig {
       requestTimeout: Duration(
         seconds: const int.fromEnvironment(
           'MEDTRACK_REQUEST_TIMEOUT_SECONDS',
-          defaultValue: 15,
+          defaultValue: 60,
         ),
       ),
       healthTimeout: Duration(
         seconds: const int.fromEnvironment(
           'MEDTRACK_HEALTH_TIMEOUT_SECONDS',
-          defaultValue: 4,
+          defaultValue: 15,
         ),
       ),
       syncInterval: Duration(

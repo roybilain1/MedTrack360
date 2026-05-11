@@ -777,10 +777,10 @@ export const announcementsApi = {
     const query = includeInactive ? '?include_inactive=true' : ''
     return fetchWithErrorHandling(`/announcements${query}`)
   },
-  create({ title, body }) {
+  create({ title, body, audience = 'both' }) {
     return fetchWithErrorHandling('/announcements', {
       method: 'POST',
-      body: JSON.stringify({ title, body }),
+      body: JSON.stringify({ title, body, audience }),
     })
   },
   deactivate(id) {

@@ -720,38 +720,43 @@ router.get('/stock', async (req, res) => {
            p.license_number,
            p.hwid,
            p.region,
-           im.barcode,
-           COALESCE(mr.trade_name, im.barcode) AS medicine_name,
+           mr.barcode,
+           COALESCE(mr.trade_name, mr.barcode) AS medicine_name,
            COALESCE(NULLIF(mr.dosage, ''), '') AS dosage,
            COALESCE(NULLIF(mr.category, ''), NULLIF(ns.category, ''), 'Uncategorized') AS category,
            COALESCE(MAX(ns.threshold), 0)::numeric AS configured_threshold,
-           GREATEST(0, SUM(im.quantity_delta))::int AS stock_units,
+           -- Stock units: prefer the live trigger-maintained pharmacy_stock.stock_units;
+           -- fall back to summing inventory_movements when present
+           GREATEST(0, COALESCE(MAX(ps.stock_units), SUM(im.quantity_delta), 0))::int AS stock_units,
            SUM(CASE WHEN im.movement_type = 'sale' AND im.happened_at >= NOW() - INTERVAL '30 days' THEN ABS(im.quantity_delta) ELSE 0 END)::numeric AS sales_30d,
            SUM(CASE WHEN im.movement_type = 'purchase' AND im.happened_at >= NOW() - INTERVAL '30 days' THEN ABS(im.quantity_delta) ELSE 0 END)::numeric AS purchases_30d,
            MAX(im.happened_at) AS last_movement_at,
            MAX(ss.last_sync_up) AS last_sync_up,
            MAX(ss.last_sync_down) AS last_sync_down,
-           COALESCE(MAX(llp.local_price_minor), NULL)::numeric AS current_price_minor,
+           COALESCE(MAX(llp.local_price_minor), MAX((ps.current_price * 100)::numeric), NULL)::numeric AS current_price_minor,
            COALESCE(MAX((mr.moph_ceiling * 100)::numeric), NULL)::numeric AS regulated_price_minor,
            MAX(lbe.expiry_at) AS expiry_at
-         FROM inventory_movements im
-         JOIN pharmacies p ON p.id = im.pharmacy_id
-         LEFT JOIN moph_registry mr ON mr.barcode = im.barcode
+         FROM pharmacy_stock ps
+         JOIN pharmacies p ON p.id = ps.pharmacy_id
+         JOIN moph_registry mr ON mr.medication_id = ps.medication_id
+         LEFT JOIN inventory_movements im
+           ON im.pharmacy_id = ps.pharmacy_id
+          AND im.barcode = mr.barcode
+          AND im.deleted_at IS NULL
          LEFT JOIN (
            SELECT barcode, MAX(threshold) AS threshold, MAX(category) AS category
            FROM national_stock
            GROUP BY barcode
-         ) ns ON ns.barcode = im.barcode
+         ) ns ON ns.barcode = mr.barcode
          LEFT JOIN pos_sync_state ss ON ss.pharmacy_id = p.id
-         LEFT JOIN latest_local_price llp ON llp.pharmacy_id = p.id AND llp.barcode = im.barcode
-         LEFT JOIN latest_batch_expiry lbe ON lbe.pharmacy_id = p.id AND lbe.barcode = im.barcode
-         WHERE im.deleted_at IS NULL
-           AND ($1 = '' OR p.name ILIKE $2 OR p.license_number ILIKE $2)
-           AND ($3 = '' OR im.barcode ILIKE $4 OR mr.trade_name ILIKE $4)
+         LEFT JOIN latest_local_price llp ON llp.pharmacy_id = p.id AND llp.barcode = mr.barcode
+         LEFT JOIN latest_batch_expiry lbe ON lbe.pharmacy_id = p.id AND lbe.barcode = mr.barcode
+         WHERE ($1 = '' OR p.name ILIKE $2 OR p.license_number ILIKE $2)
+           AND ($3 = '' OR mr.barcode ILIKE $4 OR mr.trade_name ILIKE $4)
            AND ($5 = '' OR p.region ILIKE $6)
-           AND ($7::timestamptz IS NULL OR im.happened_at >= $7::timestamptz)
-           AND ($8::timestamptz IS NULL OR im.happened_at <= $8::timestamptz)
-         GROUP BY p.id, p.name, p.license_number, p.hwid, p.region, im.barcode, mr.trade_name, COALESCE(NULLIF(mr.dosage, ''), ''), COALESCE(NULLIF(mr.category, ''), NULLIF(ns.category, ''), 'Uncategorized')
+           AND ($7::timestamptz IS NULL OR im.happened_at IS NULL OR im.happened_at >= $7::timestamptz)
+           AND ($8::timestamptz IS NULL OR im.happened_at IS NULL OR im.happened_at <= $8::timestamptz)
+         GROUP BY p.id, p.name, p.license_number, p.hwid, p.region, mr.barcode, mr.trade_name, COALESCE(NULLIF(mr.dosage, ''), ''), COALESCE(NULLIF(mr.category, ''), NULLIF(ns.category, ''), 'Uncategorized')
        ), metrics AS (
          SELECT
            g.*,

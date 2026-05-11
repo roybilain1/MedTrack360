@@ -713,6 +713,7 @@ class _InventoryTileState extends State<_InventoryTile> {
   }
 
   String get _stockLabel {
+    if (widget.item.stock <= 0) return 'Out of stock';
     if (widget.item.stock <= 10) return 'Low';
     if (widget.item.stock <= 30) return 'Medium';
     return 'In Stock';
