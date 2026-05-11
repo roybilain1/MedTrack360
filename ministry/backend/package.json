@@ -1,0 +1,23 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test src/tests/**/*.test.js",
+    "test:e2e:offline-sync": "node --test src/tests/sync.api.test.js",
+    "seed:sync:sample": "psql \"$DATABASE_URL\" -f seeds/sync_sample_seed.sql",
+    "seed:sync:e2e": "psql \"$DATABASE_URL\" -f seeds/sync_e2e_seed.sql"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "pg": "^8.20.0"
+  }
+}

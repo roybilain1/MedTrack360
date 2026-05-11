@@ -1,0 +1,2 @@
+ALTER TABLE audit_logs
+  ALTER COLUMN event_id TYPE VARCHAR(120);

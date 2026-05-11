@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.flutter/
+.dart_tool/
+build/
+dist/
+.flutter-plugins-dependencies
+
+# Environment files
+.env
+.env.local
+*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db

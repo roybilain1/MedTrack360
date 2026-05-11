@@ -1,0 +1,2 @@
+ALTER TABLE sync_outbox
+  ALTER COLUMN direction TYPE VARCHAR(20);
