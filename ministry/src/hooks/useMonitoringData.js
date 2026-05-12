@@ -86,7 +86,9 @@ export function useMonitoringData(viewId) {
       let response
       switch (viewId) {
         case 'stock':
-          response = await monitoringApi.getStock(filters)
+          // Show every medicine of every pharmacy in one page so the
+          // ministry can see all stock at once without paginating.
+          response = await monitoringApi.getStock({ ...filters, page: 1, pageSize: 500 })
           break
         case 'pricing':
           response = await monitoringApi.getPricing(filters)

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/inventory_database.dart';
 
-enum _AlertSeverity { critical, pricing, syncAck }
+enum _AlertSeverity { critical, pricing, syncAck, news }
 
 class _AlertItem {
   const _AlertItem({
@@ -103,8 +103,35 @@ class _AlertsScreenState extends State<AlertsScreen> {
     final lowStock = await _db.lowStockItems(limit: 4);
     final overpriced = await _db.pricedAboveCeiling(limit: 4);
     final syncedCount = await _db.syncedSalesCount();
+    final announcements = await _db.fetchAnnouncements(limit: 20);
 
     final alerts = <_AlertItem>[];
+
+    for (final raw in announcements) {
+      final title = (raw['title'] ?? '').toString().trim();
+      final body = (raw['body'] ?? '').toString().trim();
+      if (title.isEmpty && body.isEmpty) continue;
+      final createdAt = DateTime.tryParse((raw['created_at'] ?? '').toString());
+      String when = 'Recent';
+      if (createdAt != null) {
+        final diff = DateTime.now().difference(createdAt);
+        if (diff.inMinutes < 60) {
+          when = '${diff.inMinutes}m ago';
+        } else if (diff.inHours < 24) {
+          when = '${diff.inHours}h ago';
+        } else {
+          when = '${diff.inDays}d ago';
+        }
+      }
+      alerts.add(
+        _AlertItem(
+          title: title.isEmpty ? 'Ministry announcement' : title,
+          subtitle: body,
+          time: when,
+          severity: _AlertSeverity.news,
+        ),
+      );
+    }
 
     for (final item in lowStock) {
       final predicted = (item.stock * 3).clamp(6, 72);
@@ -269,6 +296,15 @@ class _AlertsScreenState extends State<AlertsScreen> {
                   borderColor: MedTrackColors.teal,
                   onTap: () => setState(() => _filter = _AlertSeverity.syncAck),
                 ),
+                const SizedBox(width: 8),
+                _FilterChip(
+                  label: 'Ministry News  ${_count(_AlertSeverity.news)}',
+                  selected: _filter == _AlertSeverity.news,
+                  color: const Color(0xFF1D4ED8),
+                  bg: const Color(0xFFDBEAFE),
+                  borderColor: const Color(0xFF1D4ED8),
+                  onTap: () => setState(() => _filter = _AlertSeverity.news),
+                ),
               ],
             ),
           ),
@@ -376,6 +412,8 @@ class _AlertTileState extends State<_AlertTile> {
         return const Color(0xFF7C3AED);
       case _AlertSeverity.syncAck:
         return MedTrackColors.teal;
+      case _AlertSeverity.news:
+        return const Color(0xFF1D4ED8);
     }
   }
 
@@ -387,6 +425,8 @@ class _AlertTileState extends State<_AlertTile> {
         return const Color(0xFFEDE9FE);
       case _AlertSeverity.syncAck:
         return const Color(0xFFCCFBF1);
+      case _AlertSeverity.news:
+        return const Color(0xFFDBEAFE);
     }
   }
 
@@ -398,6 +438,8 @@ class _AlertTileState extends State<_AlertTile> {
         return Icons.local_offer_rounded;
       case _AlertSeverity.syncAck:
         return Icons.cloud_done_rounded;
+      case _AlertSeverity.news:
+        return Icons.campaign_rounded;
     }
   }
 

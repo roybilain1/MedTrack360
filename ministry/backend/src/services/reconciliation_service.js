@@ -167,15 +167,18 @@ function normalizeInventoryMovementEvent(rawEvent, context) {
 }
 
 async function deriveStockTotals(client, pharmacyId) {
+  // Source from pharmacy_stock (kept current by the trg_recalc_stock trigger)
+  // joined to moph_registry for the barcode. This includes every medicine the
+  // pharmacy carries — even ones with no inventory_movements yet (e.g. newly
+  // approved medicines awaiting first purchase / sale).
   const result = await client.query(
     `SELECT
-       barcode,
-       GREATEST(0, SUM(quantity_delta))::int AS stock_units
-     FROM inventory_movements
-     WHERE pharmacy_id = $1
-       AND deleted_at IS NULL
-     GROUP BY barcode
-     ORDER BY barcode ASC`,
+       mr.barcode,
+       GREATEST(0, COALESCE(ps.stock_units, 0))::int AS stock_units
+     FROM pharmacy_stock ps
+     JOIN moph_registry mr ON mr.medication_id = ps.medication_id
+     WHERE ps.pharmacy_id = $1
+     ORDER BY mr.barcode ASC`,
     [pharmacyId]
   );
   return result.rows;

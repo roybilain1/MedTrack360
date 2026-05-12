@@ -541,6 +541,33 @@ class InventoryDatabase {
 
   Stream<int> get inventoryChanges => _inventoryChanges.stream;
 
+  /// Fetch active Ministry announcements targeted at the POS.
+  /// Returns a list of {id, title, body, source, url, created_at} maps.
+  /// Returns [] on any HTTP error so callers can degrade gracefully.
+  Future<List<Map<String, dynamic>>> fetchAnnouncements({int limit = 20}) async {
+    try {
+      final family = await resolveBackendFamily();
+      final uri = _syncUriForFamily(
+        family,
+        'sync/announcements',
+        'sync/announcements',
+      ).replace(queryParameters: {'limit': '$limit'});
+      final response = await http
+          .get(uri, headers: _canonicalSyncHeaders())
+          .timeout(_appConfig.requestTimeout);
+      if (response.statusCode != 200) return const [];
+      final json = jsonDecode(response.body);
+      final rows = (json is Map ? json['data'] : null) as List?;
+      if (rows == null) return const [];
+      return rows
+          .whereType<Map>()
+          .map((r) => Map<String, dynamic>.from(r))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   void _emitInventoryChanged() {
     if (_inventoryChanges.isClosed) return;
     _inventoryChangeTick += 1;
@@ -3048,7 +3075,7 @@ class InventoryDatabase {
           final medicineUuid = _asString(row['medicine_uuid']).trim().isEmpty
               ? _newUuid()
               : _asString(row['medicine_uuid']).trim();
-          final incomingVersion = (row['version'] as num?)?.toInt() ?? 1;
+          final incomingVersion = _asIntOrNull(row['version']) ?? 1;
           final incomingSource = _asString(row['source']).isEmpty
               ? 'server'
               : _asString(row['source']);
@@ -3056,7 +3083,7 @@ class InventoryDatabase {
               DateTime.tryParse(
                 _asString(row['deleted_at']),
               )?.toUtc().millisecondsSinceEpoch ??
-              (row['deleted_at'] as num?)?.toInt();
+              _asIntOrNull(row['deleted_at']);
           final incomingOfficialName = officialName;
           final incomingOfficialCode = resolveOfficialCode(row);
 
@@ -3075,8 +3102,7 @@ class InventoryDatabase {
               );
             }
 
-            final localBlocked =
-                ((existing['is_blocked'] as num?)?.toInt() ?? 0) == 1;
+            final localBlocked = _asBool(existing['is_blocked']);
             if (localBlocked != blocked) {
               await onConflict(
                 SyncConflict(
@@ -3107,8 +3133,8 @@ class InventoryDatabase {
           final shouldApply = existing == null
               ? true
               : _incomingIsNewer(
-                  localVersion: (existing['version'] as num?)?.toInt(),
-                  localUpdatedAt: (existing['updated_at'] as num?)?.toInt(),
+                  localVersion: _asIntOrNull(existing['version']),
+                  localUpdatedAt: _asIntOrNull(existing['updated_at']),
                   incomingVersion: incomingVersion,
                   incomingUpdatedAt: serverUpdatedAtMs,
                   localSource: _asString(existing['source']).isEmpty
@@ -3152,8 +3178,7 @@ class InventoryDatabase {
                     'Regulated price overridden by government source while syncing.',
               );
             }
-            if ((((existing['is_blocked'] as num?)?.toInt() ?? 0) == 1) !=
-                blocked) {
+            if (_asBool(existing['is_blocked']) != blocked) {
               await _recordConflictNote(
                 txn: txn,
                 entityType: 'medicine',
@@ -3223,7 +3248,7 @@ class InventoryDatabase {
           final localPrice = localPriceRows.isEmpty
               ? null
               : localPriceRows.first;
-          final incomingVersion = (row['version'] as num?)?.toInt() ?? 1;
+          final incomingVersion = _asIntOrNull(row['version']) ?? 1;
           final incomingSource = _asString(row['source']).isEmpty
               ? 'server'
               : _asString(row['source']);
@@ -3231,12 +3256,12 @@ class InventoryDatabase {
               DateTime.tryParse(
                 _asString(row['deleted_at']),
               )?.toUtc().millisecondsSinceEpoch ??
-              (row['deleted_at'] as num?)?.toInt();
+              _asIntOrNull(row['deleted_at']);
 
           if (localPrice != null &&
               !_incomingIsNewer(
-                localVersion: (localPrice['version'] as num?)?.toInt(),
-                localUpdatedAt: (localPrice['updated_at'] as num?)?.toInt(),
+                localVersion: _asIntOrNull(localPrice['version']),
+                localUpdatedAt: _asIntOrNull(localPrice['updated_at']),
                 incomingVersion: incomingVersion,
                 incomingUpdatedAt: updatedAt,
                 localSource: _asString(localPrice['source']).isEmpty
@@ -3273,17 +3298,19 @@ class InventoryDatabase {
             );
           }
 
+          final incomingLocalMinor = _asIntOrNull(row['local_price_minor']);
+          final incomingRegulatedMinor = _asIntOrNull(row['regulated_price_minor']);
+
           await txn.insert('prices', {
             'price_uuid': _asString(row['price_uuid']).isEmpty
                 ? _newUuid()
                 : _asString(row['price_uuid']),
             'pharmacy_id':
-                ((row['pharmacy_id'] as num?)?.toInt()) ??
+                _asIntOrNull(row['pharmacy_id']) ??
                 (kPharmacyId > 0 ? kPharmacyId : null),
             'barcode': barcode,
-            'regulated_price_minor': (row['regulated_price_minor'] as num?)
-                ?.toInt(),
-            'local_price_minor': null,
+            'regulated_price_minor': incomingRegulatedMinor,
+            'local_price_minor': incomingLocalMinor,
             'currency_code': _asString(row['currency_code']).isEmpty
                 ? 'USD'
                 : _asString(row['currency_code']),
@@ -3293,15 +3320,43 @@ class InventoryDatabase {
             'deleted_at': incomingDeletedAt,
           }, conflictAlgorithm: ConflictAlgorithm.replace);
 
-          // Keep inventory ceiling aligned with canonical regulated price data.
+          // Keep inventory price + ceiling aligned with canonical pricing.
+          // Local price comes from the pharmacy's own sales / approved price.
+          // Ministry ceiling (moph_ceiling) is the regulated price.
+          final inventoryUpdate = <String, dynamic>{
+            'moph_ceiling': incomingRegulatedMinor == null
+                ? null
+                : incomingRegulatedMinor / 100.0,
+          };
+          if (incomingLocalMinor != null) {
+            inventoryUpdate['price'] = incomingLocalMinor / 100.0;
+          }
           await txn.update(
             'inventory',
-            {
-              'moph_ceiling':
-                  ((row['regulated_price_minor'] as num?)?.toDouble()) == null
-                  ? null
-                  : ((row['regulated_price_minor'] as num).toDouble() / 100.0),
-            },
+            inventoryUpdate,
+            where: 'barcode = ?',
+            whereArgs: [barcode],
+          );
+        }
+
+        // Apply per-pharmacy stock totals so the inventory reflects what the
+        // server says this pharmacy has on hand. Without this, after a local
+        // wipe / fresh sync every medicine would show 0 units even when the
+        // backend's pharmacy_stock has real numbers.
+        final stockTotals =
+            ((pullData['stock_totals'] ?? jsonResponse['stock_totals'])
+                    as List?)
+                ?.cast<Map>() ??
+            const [];
+        for (final raw in stockTotals) {
+          final row = Map<String, dynamic>.from(raw);
+          final barcode = _asString(row['barcode']).trim();
+          if (barcode.isEmpty) continue;
+          final stock = _asIntOrNull(row['stock_units']);
+          if (stock == null) continue;
+          await txn.update(
+            'inventory',
+            {'stock': stock.clamp(0, 999999)},
             where: 'barcode = ?',
             whereArgs: [barcode],
           );
@@ -3325,16 +3380,16 @@ class InventoryDatabase {
               DateTime.tryParse(
                 _asString(row['deleted_at']),
               )?.toUtc().millisecondsSinceEpoch ??
-              (row['deleted_at'] as num?)?.toInt();
+              _asIntOrNull(row['deleted_at']);
           await txn.insert('compliance_alerts', {
             'alert_uuid': alertUuid,
             'pharmacy_id':
-                ((row['pharmacy_id'] as num?)?.toInt()) ??
+                _asIntOrNull(row['pharmacy_id']) ??
                 (kPharmacyId > 0 ? kPharmacyId : null),
             'source': _asString(row['source']).isEmpty
                 ? 'server'
                 : _asString(row['source']),
-            'version': (row['version'] as num?)?.toInt() ?? 1,
+            'version': _asIntOrNull(row['version']) ?? 1,
             'alert_type': _asString(row['alert_type']),
             'severity': _asString(row['severity']).isEmpty
                 ? 'medium'
@@ -3358,13 +3413,13 @@ class InventoryDatabase {
               DateTime.tryParse(
                 _asString(row['deleted_at']),
               )?.toUtc().millisecondsSinceEpoch ??
-              (row['deleted_at'] as num?)?.toInt();
+              _asIntOrNull(row['deleted_at']);
           await txn.insert('sync_conflict_notes', {
             'note_uuid': _asString(row['conflict_uuid']).isEmpty
                 ? _newUuid()
                 : _asString(row['conflict_uuid']),
             'pharmacy_id':
-                ((row['pharmacy_id'] as num?)?.toInt()) ??
+                _asIntOrNull(row['pharmacy_id']) ??
                 (kPharmacyId > 0 ? kPharmacyId : null),
             'entity_type': _asString(row['entity_type']),
             'entity_id': _asString(row['entity_id']),
@@ -3430,11 +3485,7 @@ class InventoryDatabase {
           _backendFamily = fallbackFamily;
           ackResponse = await http
               .post(
-                _syncUriForFamily(
-                  fallbackFamily,
-                  'sync/ack',
-                  'sync/ack',
-                ),
+                _syncUriForFamily(fallbackFamily, 'sync/ack', 'sync/ack'),
                 headers: _canonicalSyncHeaders(includeJson: true),
                 body: ackPayload,
               )

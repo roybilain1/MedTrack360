@@ -1010,19 +1010,28 @@ async function pullSyncData(client, args) {
 
   const priceRows = await client.query(
     `SELECT
-       md5(barcode)::uuid AS price_uuid,
+       md5(p.barcode)::uuid AS price_uuid,
        $1::int AS pharmacy_id,
-       barcode,
-       regulated_price_minor,
-       local_price_minor,
-       currency_code,
-       source,
-       version,
-       deleted_at,
-       updated_at
-     FROM prices
-     WHERE deleted_at IS NULL
-     ORDER BY updated_at DESC
+       p.barcode,
+       p.regulated_price_minor,
+       -- Per-pharmacy price: prefer pharmacy_stock.current_price,
+       -- fall back to the global prices.local_price_minor.
+       COALESCE(
+         ROUND(ps.current_price * 100)::bigint,
+         p.local_price_minor
+       ) AS local_price_minor,
+       p.currency_code,
+       p.source,
+       p.version,
+       p.deleted_at,
+       p.updated_at
+     FROM prices p
+     LEFT JOIN moph_registry mr ON mr.barcode = p.barcode
+     LEFT JOIN pharmacy_stock ps
+       ON ps.medication_id = mr.medication_id
+      AND ps.pharmacy_id = $1
+     WHERE p.deleted_at IS NULL
+     ORDER BY p.updated_at DESC
      LIMIT 500`,
     [args.pharmacy.id]
   );

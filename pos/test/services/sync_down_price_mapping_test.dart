@@ -26,9 +26,15 @@ void main() {
       'regulated_price_minor': 5000,
     });
     final legacyPrice = extractOfficialPrice({'moph_ceiling': 50.0});
+    final stringCanonicalPrice = extractOfficialPrice({
+      'regulated_price_minor': '5000',
+    });
+    final stringLegacyPrice = extractOfficialPrice({'moph_ceiling': '50.0'});
 
     expect(canonicalPrice, 50.0);
     expect(legacyPrice, 50.0);
+    expect(stringCanonicalPrice, 50.0);
+    expect(stringLegacyPrice, 50.0);
   });
 
   test(

@@ -44,7 +44,7 @@ function clamp(n, min, max) {
 
 function parsePagination(req) {
   const page = clamp(toInt(req.query.page, 1), 1, 100000);
-  const pageSize = clamp(toInt(req.query.pageSize, 25), 1, 200);
+  const pageSize = clamp(toInt(req.query.pageSize, 25), 1, 1000);
   const offset = (page - 1) * pageSize;
   return { page, pageSize, offset };
 }
